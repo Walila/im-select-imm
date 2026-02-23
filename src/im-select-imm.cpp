@@ -1,31 +1,43 @@
 #include "stdafx.h"
 #include "parg.h"
-
 #include <cstdlib>
 #include <cstring>
 #include <Windows.h>
 #include <immdev.h>
-/* #define DEBUG */
 
 using namespace std;
 
+int g_verbose = 0;
+
 int getInputMethod() {
-	HWND hwnd = GetForegroundWindow(); //dll
+	HWND hwnd = GetForegroundWindow();
 	if (hwnd) {
-		DWORD threadID = GetWindowThreadProcessId(hwnd, NULL); //dll
-		HKL currentLayout = GetKeyboardLayout(threadID); //dll
+		DWORD threadID = GetWindowThreadProcessId(hwnd, NULL);
+		HKL currentLayout = GetKeyboardLayout(threadID);
 		unsigned int x = (unsigned int)currentLayout & 0x0000FFFF;
+		if (g_verbose) {
+			printf("[verbose] getInputMethod: HWND=0x%p threadID=%lu HKL=0x%p locale=0x%04X\n",
+			       (void*)hwnd, threadID, (void*)currentLayout, x);
+		}
 		return ((int)x);
+	}
+	if (g_verbose) {
+		printf("[verbose] getInputMethod: GetForegroundWindow returned NULL\n");
 	}
 	return 0;
 }
+
 void switchInputMethod(int locale) {
     if (locale < 0) {
         return;
     }
-	HWND hwnd = GetForegroundWindow(); //dll
+	HWND hwnd = GetForegroundWindow();
 	LPARAM currentLayout = ((LPARAM)locale);
-	PostMessage(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, currentLayout); //dll
+	if (g_verbose) {
+		printf("[verbose] switchInputMethod: HWND=0x%p locale=0x%04X\n",
+		       (void*)hwnd, locale);
+	}
+	PostMessage(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, currentLayout);
 }
 
 // API: https://learn.microsoft.com/en-us/previous-versions/aa913780(v=msdn.10)
@@ -38,12 +50,19 @@ void switchInputMethod(int locale) {
 //       1024: English / Full Shape (Bit10 and Bit1 used)
 //       1025: Chinese / Full Shape
 LRESULT getInputMode(){
-    HWND foregroundWindow  = GetForegroundWindow(); 
+    HWND foregroundWindow  = GetForegroundWindow();
     HWND foregroundIME = ImmGetDefaultIMEWnd(foregroundWindow);
     if(foregroundIME){
         LRESULT result = SendMessage(foregroundIME, WM_IME_CONTROL, 0x001, 0);
+        if (g_verbose) {
+            printf("[verbose] getInputMode(IMM32): HWND=0x%p IME_HWND=0x%p mode=%lld\n",
+                   (void*)foregroundWindow, (void*)foregroundIME, (long long)result);
+        }
         return result;
     } else {
+        if (g_verbose) {
+            printf("[verbose] getInputMode(IMM32): ImmGetDefaultIMEWnd returned NULL\n");
+        }
         return 0;
     }
 }
@@ -52,10 +71,34 @@ void switchInputMode(LRESULT mode){
     if ( mode < 0 ) {
         return;
     }
-    HWND foregroundWindow  = GetForegroundWindow(); 
-    HWND foregroundIME = ImmGetDefaultIMEWnd(foregroundWindow);
-    LPARAM currentMode = (LPARAM)mode;
-    SendMessage(foregroundIME, WM_IME_CONTROL, IMC_SETCONVERSIONMODE, currentMode);
+    // Read current mode before toggling
+    LRESULT preMode = getInputMode();
+
+    if (g_verbose) {
+        printf("[verbose] switchInputMode: current_mode=%lld target_mode=%lld\n",
+               (long long)preMode, (long long)mode);
+    }
+
+    if (preMode == mode) {
+        if (g_verbose) {
+            printf("[verbose] switchInputMode: mode already correct, nothing to do\n");
+        }
+        return;
+    }
+
+    // Simulate Shift key to toggle Chinese/English mode.
+    // Do NOT use IMM32 IMC_SETCONVERSIONMODE — pure TSF IMEs (e.g. Boshiamy J)
+    // fake-accept the write and corrupt subsequent IMM32 reads.
+    INPUT inputs[2] = {};
+    inputs[0].type = INPUT_KEYBOARD;
+    inputs[0].ki.wVk = VK_SHIFT;
+    inputs[1].type = INPUT_KEYBOARD;
+    inputs[1].ki.wVk = VK_SHIFT;
+    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+    UINT sent = SendInput(2, inputs, sizeof(INPUT));
+    if (g_verbose) {
+        printf("[verbose] switchInputMode: SendInput Shift (sent=%u)\n", sent);
+    }
 }
 
 
@@ -67,28 +110,26 @@ int main(int argc, char** argv)
     parg_init(&ps);
     // h: help page
     // d: delay INT ms
-    const char optstring[] = "hd:" ;
+    // v: verbose output
+    const char optstring[] = "hvd:" ;
     int optend = parg_reorder(argc, argv, optstring, NULL);
 
-    /* printf("%d\n", optend) ; */
-
-
-    int delay = 30 ; // ms 
+    int delay = 30 ; // ms
     while ((c = parg_getopt(&ps, optend, argv, optstring)) != -1) {
         switch (c) {
             case 'h':
                 printf( \
                         "USAGE:                                              \n" \
-                        "       im-select-imm [-h] [-d DELAY] [METHOD] [MODE]\n" \
+                        "       im-select-imm [-h] [-v] [-d DELAY] [METHOD] [MODE]\n" \
                         "VERSION:                                            \n" \
-                        "       1.0.2                                        \n" \
+                        "       1.1.0                                        \n" \
                         );
                 return 0;
+            case 'v':
+                g_verbose = 1;
+                break;
             case 'd':
-                delay = atoi(ps.optarg); 
-                #ifdef DEBUG 
-                printf("DELAY: %d\n", delay);
-                #endif
+                delay = atoi(ps.optarg);
                 break;
             case 1:
                 // for remaining option
@@ -101,16 +142,10 @@ int main(int argc, char** argv)
     int remian_argc = argc - ps.optind ;
     char **remain_argv = argv + ps.optind ;
 
-    #ifdef DEBUG
-    printf("OPTIND: %d\n", ps.optind);
-    printf("REMIAN_ARGC: %d\n", remian_argc);
-    for(int i = 1; i < argc; i++) {
-        printf("ARGV[%d]: %s\n", i, argv[i]);
+    if (g_verbose) {
+        printf("[verbose] argc=%d optind=%d remain=%d delay=%d\n",
+               argc, ps.optind, remian_argc, delay);
     }
-    for(int i = 0; i < remian_argc; i++) {
-        printf("REMAIN_ARGV[%d]: %s\n", i, remain_argv[i]);
-    }
-    #endif
 
     // get mode
     if ( remian_argc == 0 ) {
@@ -118,7 +153,7 @@ int main(int argc, char** argv)
         int imMode = getInputMode();
         printf("%d-%d\n", imID, imMode);
         return 0;
-    } 
+    }
 
     // not getmode, so is set mode
     LRESULT mode = -1;
@@ -134,17 +169,17 @@ int main(int argc, char** argv)
         } else {
             method = atoi(remain_argv[0]);
         }
-    } 
+    }
 
     if ( remian_argc == 2 ) {
 		// im-select-imm [Method] [Mode]
         method = atoi(remain_argv[0]);
         mode = atoi(remain_argv[1]);
     }
-    #ifdef DEBUG
-    printf("SET METHOD: %d\n", method);
-    printf("SET MODE: %d\n", mode);
-    #endif 
+
+    if (g_verbose) {
+        printf("[verbose] SET METHOD: %d MODE: %lld\n", method, (long long)mode);
+    }
 
     switchInputMethod(method);
     Sleep(delay);
@@ -152,4 +187,3 @@ int main(int argc, char** argv)
 
 	return 0;
 }
-

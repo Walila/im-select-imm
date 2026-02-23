@@ -9,9 +9,8 @@ target("im-select-imm")
     
     add_includedirs("inc/")
  
-    add_rules("win.sdk.application")
     add_ldflags("-subsystem:console")
-    add_links("imm32")
+    add_links("imm32", "user32")
 
 
 
