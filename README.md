@@ -29,6 +29,16 @@ Or
 /path/to/im-select-imm.exe -d 50 [target IME]-[target IME Mode] # add delay between switching IME and mode, default 30ms
 ```
 
+### Shift Key Mode (`-s`)
+
+By default, mode switching uses the IMM32 `IMC_SETCONVERSIONMODE` API, which works for standard Microsoft IMEs.
+
+For pure TSF IMEs (e.g. Boshiamy J), use the `-s` flag to switch mode via Shift key simulation instead:
+
+```shell
+/path/to/im-select-imm.exe -s [target IME]-[target IME Mode]
+```
+
 ### Verbose Mode
 
 ```shell
@@ -55,7 +65,38 @@ For Microsoft New Chinese IME (Win11):
     1025: Chinese / Full Shape
 ```
 
+## Usage with im-select.nvim
+
+This tool works with [keaising/im-select.nvim](https://github.com/keaising/im-select.nvim). Example configuration in Neovim (lazy.nvim):
+
+### Microsoft IME (default IMM32 mode)
+
+```lua
+{
+    "keaising/im-select.nvim",
+    opts = {
+        default_im_select = "1033-0",
+        default_command = { "/path/to/im-select-imm.exe" },
+    },
+}
+```
+
+### Boshiamy J / Pure TSF IMEs (Shift key mode)
+
+```lua
+{
+    "keaising/im-select.nvim",
+    opts = {
+        default_im_select = "1028-0",
+        default_command = { "/path/to/im-select-imm.exe", "-s" },
+    },
+}
+```
+
+> The `-s` flag is passed to both GET and SET calls. It has no effect on GET (reading current mode) and only affects SET (mode switching).
+
 ## Notes
 
-- For pure TSF IMEs (e.g. Boshiamy J), mode switching is done by simulating a Shift key press instead of using IMM32 API.
+- By default, mode switching uses the IMM32 `IMC_SETCONVERSIONMODE` API, which works for standard Microsoft IMEs.
+- With the `-s` flag, mode switching is done by simulating a Shift key press, which is required for pure TSF IMEs (e.g. Boshiamy J).
 - Use `-v` flag to see which approach is being used for debugging.

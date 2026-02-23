@@ -8,6 +8,7 @@
 using namespace std;
 
 int g_verbose = 0;
+int g_shift_mode = 0;
 
 int getInputMethod() {
 	HWND hwnd = GetForegroundWindow();
@@ -71,33 +72,49 @@ void switchInputMode(LRESULT mode){
     if ( mode < 0 ) {
         return;
     }
-    // Read current mode before toggling
-    LRESULT preMode = getInputMode();
 
-    if (g_verbose) {
-        printf("[verbose] switchInputMode: current_mode=%lld target_mode=%lld\n",
-               (long long)preMode, (long long)mode);
-    }
+    if (g_shift_mode) {
+        // -s flag: Simulate Shift key to toggle Chinese/English mode.
+        // Required for pure TSF IMEs (e.g. Boshiamy J) that fake-accept
+        // IMM32 writes and corrupt subsequent reads.
+        LRESULT preMode = getInputMode();
 
-    if (preMode == mode) {
         if (g_verbose) {
-            printf("[verbose] switchInputMode: mode already correct, nothing to do\n");
+            printf("[verbose] switchInputMode(Shift): current_mode=%lld target_mode=%lld\n",
+                   (long long)preMode, (long long)mode);
         }
-        return;
-    }
 
-    // Simulate Shift key to toggle Chinese/English mode.
-    // Do NOT use IMM32 IMC_SETCONVERSIONMODE — pure TSF IMEs (e.g. Boshiamy J)
-    // fake-accept the write and corrupt subsequent IMM32 reads.
-    INPUT inputs[2] = {};
-    inputs[0].type = INPUT_KEYBOARD;
-    inputs[0].ki.wVk = VK_SHIFT;
-    inputs[1].type = INPUT_KEYBOARD;
-    inputs[1].ki.wVk = VK_SHIFT;
-    inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
-    UINT sent = SendInput(2, inputs, sizeof(INPUT));
-    if (g_verbose) {
-        printf("[verbose] switchInputMode: SendInput Shift (sent=%u)\n", sent);
+        if (preMode == mode) {
+            if (g_verbose) {
+                printf("[verbose] switchInputMode(Shift): mode already correct, nothing to do\n");
+            }
+            return;
+        }
+
+        INPUT inputs[2] = {};
+        inputs[0].type = INPUT_KEYBOARD;
+        inputs[0].ki.wVk = VK_SHIFT;
+        inputs[1].type = INPUT_KEYBOARD;
+        inputs[1].ki.wVk = VK_SHIFT;
+        inputs[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        UINT sent = SendInput(2, inputs, sizeof(INPUT));
+        if (g_verbose) {
+            printf("[verbose] switchInputMode(Shift): SendInput (sent=%u)\n", sent);
+        }
+    } else {
+        // Default: IMM32 IMC_SETCONVERSIONMODE via SendMessage.
+        // Works for standard Microsoft IMEs.
+        HWND foregroundWindow = GetForegroundWindow();
+        HWND foregroundIME = ImmGetDefaultIMEWnd(foregroundWindow);
+
+        if (g_verbose) {
+            printf("[verbose] switchInputMode(IMM32): HWND=0x%p IME_HWND=0x%p target_mode=%lld\n",
+                   (void*)foregroundWindow, (void*)foregroundIME, (long long)mode);
+        }
+
+        if (foregroundIME) {
+            SendMessage(foregroundIME, WM_IME_CONTROL, IMC_SETCONVERSIONMODE, (LPARAM)mode);
+        }
     }
 }
 
@@ -109,9 +126,10 @@ int main(int argc, char** argv)
     int c;
     parg_init(&ps);
     // h: help page
+    // s: use Shift key simulation for mode switch
     // d: delay INT ms
     // v: verbose output
-    const char optstring[] = "hvd:" ;
+    const char optstring[] = "hsvd:" ;
     int optend = parg_reorder(argc, argv, optstring, NULL);
 
     int delay = 30 ; // ms
@@ -120,11 +138,18 @@ int main(int argc, char** argv)
             case 'h':
                 printf( \
                         "USAGE:                                              \n" \
-                        "       im-select-imm [-h] [-v] [-d DELAY] [METHOD] [MODE]\n" \
+                        "       im-select-imm [-h] [-s] [-v] [-d DELAY] [METHOD] [MODE]\n" \
+                        "OPTIONS:                                            \n" \
+                        "       -s  Use Shift key simulation for mode switch \n" \
+                        "           (for pure TSF IMEs like Boshiamy J)      \n" \
+                        "           Default: IMM32 IMC_SETCONVERSIONMODE     \n" \
                         "VERSION:                                            \n" \
-                        "       1.1.0                                        \n" \
+                        "       1.2.0                                        \n" \
                         );
                 return 0;
+            case 's':
+                g_shift_mode = 1;
+                break;
             case 'v':
                 g_verbose = 1;
                 break;

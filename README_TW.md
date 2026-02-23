@@ -27,6 +27,16 @@ Or
 /path/to/im-select-imm.exe -d 50 [目標輸入法]-[目標輸入法的目標模式] # 在切換輸入法和模式之間插入延遲，預設 30ms，可能可以改善部分人無效的情況
 ```
 
+### Shift 按鍵模式（`-s`）
+
+預設情況下，模式切換使用 IMM32 `IMC_SETCONVERSIONMODE` API，適用於標準微軟輸入法。
+
+對於純 TSF 架構的輸入法（例如嘸蝦米 J），請使用 `-s` 參數改以模擬 Shift 按鍵來切換模式：
+
+```shell
+/path/to/im-select-imm.exe -s [目標輸入法]-[目標輸入法的目標模式]
+```
+
 ### 診斷模式
 
 ```shell
@@ -52,7 +62,38 @@ Microsoft 新版中文輸入法 (Win11)：
     1025: 中文 / 全形
 ```
 
+## 搭配 im-select.nvim 使用
+
+本工具可搭配 [keaising/im-select.nvim](https://github.com/keaising/im-select.nvim) 使用。以下為 Neovim 設定範例（lazy.nvim）：
+
+### 微軟輸入法（預設 IMM32 模式）
+
+```lua
+{
+    "keaising/im-select.nvim",
+    opts = {
+        default_im_select = "1033-0",
+        default_command = { "/path/to/im-select-imm.exe" },
+    },
+}
+```
+
+### 嘸蝦米 J / 純 TSF 輸入法（Shift 按鍵模式）
+
+```lua
+{
+    "keaising/im-select.nvim",
+    opts = {
+        default_im_select = "1028-0",
+        default_command = { "/path/to/im-select-imm.exe", "-s" },
+    },
+}
+```
+
+> `-s` 參數會同時傳遞給 GET 和 SET 呼叫。對 GET（讀取目前模式）無影響，僅在 SET（切換模式）時生效。
+
 ## 備註
 
-- 對於純 TSF 架構的輸入法（例如嘸蝦米 J），模式切換是透過模擬 Shift 按鍵來實現，而非使用 IMM32 API。
+- 預設情況下，模式切換使用 IMM32 `IMC_SETCONVERSIONMODE` API，適用於標準微軟輸入法。
+- 加上 `-s` 參數後，模式切換改為模擬 Shift 按鍵，適用於純 TSF 架構的輸入法（例如嘸蝦米 J）。
 - 使用 `-v` 參數可以查看目前使用的切換方式，方便除錯。
